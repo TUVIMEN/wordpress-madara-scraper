@@ -1,0 +1,169 @@
+#!/bin/bash
+
+shopt -s extglob
+
+IFS=$'\n'
+
+declare threads='4' cookie_t
+declare -r arg0="$(basename "$0")"
+
+usage() {
+    printf '%s [OPTION...]\n' "$arg0"
+    printf "Download image focused wordpress madara extension sites.\n"
+    printf "Type of page depends on [-pcle] options.\n"
+    printf "Pages will be saved in files named by their md5 hash of urls.\n\n"
+    printf "Options:\n"
+    printf "  -t NUM\tset number of used threads, by default set to 4\n"
+    printf "  -d DIR\tset directory\n"
+    printf "  -p LINK\tget list of comics by going through pages in LINK\n"
+    printf "  -c FILE\tget json of comics from links in FILE (md5).\n"
+    printf "  -l FILE\tget links to images of chapters from links in FILE (md5)\n"
+    printf "  -e LINK\tdo everything above to download the site\n"
+    printf "  -h\t\tshow help\n"
+}
+
+ucurl() {
+    curl -k -L -g -m 120 -s -b "$_cookies" --user-agent 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/5.15.2 Chrome/87.0.4280.144 Safari/537.36' -H 'Accept-Encoding: gzip, deflate' -H "Cookies: cf_clearance=aMpcrgZLCYnmIIJe65eSvKtdZ7Xf1Z6RmKHatwF2T1I-1701281195-0-1-62df4351.700712a.2f81340b-0.2.1701281195" --compressed "$@"
+}
+
+baseurl() {
+    sed -E 's/^(^http(s)?:\/\/([a-zA-Z][^/]*\.)*[A-Za-z]*).*$/\1/'
+}
+
+get_page_info() {
+    t1="$(ucurl "$1" | tr -d '\n\t\r')"
+    {
+    echo $(hgrep 'h1 | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//') #title
+    t_chapters_input="$t1"
+    t_chapters="$(hgrep 'li .wp-manga-chapter; a +href -title | "%i"' <<< "$t_chapters_input")"
+    [ -z "$t_chapters" ] && {
+        t_id="$(hgrep 'div #manga-chapters-holder data-id | "%(data-id)a\n"' <<< "$t1")"
+        bbase="$(baseurl <<< "$1")"
+        t_chapters_input="$(ucurl -X POST  -H "Referer: $1" -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=manga_get_chapters&manga='"$t_id" "$bbase/wp-admin/admin-ajax.php" | tr -d '\n\t\r')"
+        t_chapters="$(hgrep 'li .wp-manga-chapter; a +href -title | "%i"' <<< "$t_chapters_input")"
+        [ -z "$t_chapters" ] && {
+            t_chapters_input="$(ucurl "${1}ajax/chapters/" --compressed -X POST -H 'X-Requested-With: XMLHttpRequest' | tr -d '\n\t\r')"
+            t_chapters="$(hgrep 'li .wp-manga-chapter; a +href -title | "%i"' <<< "$t_chapters_input")"
+        }
+    }
+    echo "$t_chapters" #chapter
+    echo "$(hgrep 'li .wp-manga-chapter; a href -title | "%(href)a"' <<< "$t_chapters_input")" #links
+    echo "$(hgrep 'li .wp-manga-chapter; span .chapter-release-date; i | "%i"' <<< "$t_chapters_input")" #dates
+
+    echo "$(hgrep 'div .summary_image; img data-src | "%(data-src)a\n"' <<< "$t1")" #thumbnail
+    echo "$(hgrep 'div .summary__content | "%i\n"' <<< "$t1")" #summary
+    t2="$(hgrep 'div +class="summary_content"; div +class="post-content"' <<< "$t1")"
+    echo "$(hgrep 'span +id="averagerate" property="ratingValue" | "%i\n"' <<< "$t2" | tr -d ' ')" #rating
+    echo "$(hgrep 'span #countrate property="ratingCount" | "%i\n"' <<< "$t2")" #rating_count strtonum
+
+    echo "$(hgrep 'div .action_detail; span @m"[cC]omments" | "%i\n"' <<< "$t1" | sed 's/[cC]omments.*//; s/ //g')" #comments strtonum
+    echo "$(hgrep 'div .action_detail; span @m"bookmarked" | "%i\n"' <<< "$t1" | sed 's/ .*//')" #bookmark strtonum
+    echo "$(hgrep 'div .summary-content @m", it has " | "%i\n"' <<< "$t2" | sed 's/,.*//')" #rank
+    echo "$(hgrep 'div .summary-content @m", it has " | "%i\n"' <<< "$t2" | sed 's/.*, it has //; s/ view//; s/s//; s/ .*//')" #views strtonum
+    echo "$(hgrep 'div .post-content_item @m">Alternative"; div .summary-content | "%i\n"' <<< "$t2" | sed 's/, /,/g')" #alternatives
+    echo "$(hgrep 'div .author-content; a href | "%i"' <<< "$t2")" #authors
+    echo "$(hgrep 'div .artist-content; a href | "%i"' <<< "$t2")" #artists
+    echo "$(hgrep 'div .genres-content; a href | "%i"' <<< "$t2")" #genres
+    echo "$(hgrep 'div .post-content_item @m">Type"; div .summary-content | "%i\n"' <<< "$t2" | sed 's/^ *//;s/ *$//')" #type
+    echo "$(hgrep 'div .tags-content; a href | "%i"' <<< "$t2")" #tags
+    echo "$(hgrep 'div .post-content_item @m">Release"; div .summary-content; .* @M"<" | "%i"' <<< "$t1")" #releases
+    echo "$(hgrep 'div .post-content_item @m">Status"; div .summary-content; .* @M"<" | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//')" #status
+    } | jq -RnMcr '
+        .["title"]=input |
+        .["chapters"]=([(input | split(""))[:-1],(input | split(""))[:-1],(input | split(""))[:-1]] | transpose | map({"name":.[0],"link":.[1],"date":.[2]})) |
+        .["thumbnail"]=input |
+        .["summary"]=input |
+        .["rating"]=input |
+        .["rating_count"]=input |
+        .["comments"]=input |
+        .["bookmark"]=input |
+        .["rank"]=input |
+        .["views"]=input |
+        .["alternatives"]=(input | split(",")) |
+        .["authors"]=(input | split(""))[:-1] |
+        .["artists"]=(input | split(""))[:-1] |
+        .["genres"]=(input | split(""))[:-1] |
+        .["type"]=input |
+        .["tags"]=(input | split(""))[:-1] |
+        .["releases"]=(input | split(""))[:-1] |
+        .["status"]=input'
+}
+
+get_chapter_images() {
+    ucurl "$1" | tr -d '\n\t\r' | hgrep 'img #image-[0-9]\+ data-src | "%(data-src)a\n"'
+}
+
+[ "$#" -eq '0' ] && { usage >&2; exit 1; }
+
+while [ "$#" -gt 0 ]
+do
+    case "$1" in
+        -t) threads="$2"; shift;;
+        -d) cd "$2" || continue; shift;;
+        -p)
+            t="$(ucurl "$2" | tr -d "\n\t\r")"
+            next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
+
+            if [ -n "$next" ]
+            then
+                while [ -n "$next" ]
+                do
+                    hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"' <<< "$t"
+                    next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
+                    t="$(ucurl "$next" | tr -d "\n\t\r")"
+                done
+            else
+                g=0;
+                bbase="$(baseurl <<< "$2")"
+                rr="not null";
+
+                while [ -n "$rr" ]
+                do
+                    rr="$(ucurl "$bbase/wp-admin/admin-ajax.php" --compressed -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=madara_load_more&page='"$g"'&template=madara-core%2Fcontent%2Fcontent-archive&vars%5Bpaged%5D=1&vars%5Borderby%5D=meta_value_num&vars%5Btemplate%5D=archive&vars%5Bsidebar%5D=right&vars%5Bpost_type%5D=wp-manga&vars%5Bpost_status%5D=publish&vars%5Bmeta_key%5D=_latest_update&vars%5Border%5D=desc&vars%5Bmeta_query%5D%5Brelation%5D=OR&vars%5Bmanga_archives_item_layout%5D=default' | tr -d '\n\t\r' | hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"')"
+                    echo "$rr"
+                    ((g++))
+                done
+            fi
+            shift;;
+        -c)
+            while read -r i
+            do
+                [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
+                rh="$(md5sum <<< "$i")"
+                rn="${rh%  *}"
+                [ -e "$rn" ] && [ "$(stat -c%s "$rn")" -gt '250' ] && continue
+                echo "$i"
+                get_page_info "$i" > "$rn" &
+            done < "$2"
+            shift;;
+        -l)
+            while read -r i
+            do
+                [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
+                rh="$(md5sum <<< "$i")"
+                rn="${rh%  *}"
+                [ -e "$rn" ] && [ "$(stat -c%s "$rn")" -gt '0' ] && continue
+                echo "$i"
+                get_chapter_images "$i" > "$rn" &
+            done < "$2"
+            shift;;
+        -e)
+            links="$(mktemp)"
+            trap 'rm "$links"' SIGINT EXIT
+            $0 -p "$2" > "$links"
+            $0 -t "$threads" -c "$links"
+            for i in $(find -maxdepth 1 -type f | grep -xE '\./[0-9a-f]{32}')
+            do
+                mkdir "${i}_"
+                wordpress_madara -t "$threads" -d "${i}_" -l <(jq -r '.chapters[].link' "$i")
+            done
+            shift;;
+        -h) usage; exit 0;;
+        -*) printf '%s: invalid argument -- %s\n' "$arg0" "$1" >&2; exit 1;;
+    esac
+    shift
+done
+
+wait
+
+#for i in $(find -maxdepth 1 -type f | grep -xE '\./[0-9a-f]{32}'); do mkdir "${i}_"; wordpress_madara -d "${i}_" -l <(jq -r '.chapters[].link' "$i"); done
