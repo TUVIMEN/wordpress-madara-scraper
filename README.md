@@ -38,7 +38,7 @@ Download images links from chapters in comics FILE into FILES named by md5 hash 
 
     wordpress-madara-scraper -l FILE
 
-Which an be united, creating files containing images links from chapters in directory named by comics file ended with '_'
+Which can be united, creating files containing images links from chapters in directory named by comics file ended with '_'
 
     for i in $(find -maxdepth 1 -type f | grep -xE '\./[0-9a-f]{32}')
     do
