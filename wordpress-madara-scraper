@@ -11,17 +11,32 @@ declare -r arg0="$(basename "$0")"
 
 usage() {
     printf '%s [OPTION...]\n' "$arg0"
-    printf "Download image focused wordpress madara extension sites.\n"
-    printf "Type of page depends on [-pcle] options.\n"
-    printf "Pages will be saved in files named by their md5 hash of urls.\n\n"
+    printf "Download image focused wordpress madara extension sites.\n\n"
+    printf "Metadata is downloaded by [-pcl], --full-comic and --full-pages options.\n"
+    printf "These options group metadata in files named by md5 hash of their links.\n"
+    printf "Comic are stored in json, but also create directory named by them ended with '_' character in which their chapters are stored.\n"
+    printf "Chapters create files containing links to their images, i.e.:\n"
+    printf "\n\t{1th comic(json)}\n\t{1th comic}_/\n"
+    printf "\t\t{1th chapter(links)}\n\t\t{2th chapter(links)}\n"
+    printf "\t{2th comic(json)}\n\t{2th comic}_/\n"
+    printf "\t\t{1th chapter(links)}\n\n"
+    printf "The --download-chapter, --download-comic and --download-pages options download images.\n"
+    printf "They create similar structure but files are named by their names with '/' character translated to '|'.\n"
+    printf "Also chapters are stored in their own directories, i.e.:\n"
+    printf "\n\t{1th comic name(json)}\n\t{1th comic name}_/\n"
+    printf "\t\t{1th chapter name}/\n\t\t\t1.jpg\n\t\t\t2.jpg\n\n"
     printf "Options:\n"
-    printf "  -t NUM\tset number of used threads, by default set to 4\n"
-    printf "  -d DIR\tset directory\n"
-    printf "  -p LINK\tget list of comics by going through pages in LINK\n"
-    printf "  -c FILE\tget json of comics from links in FILE (md5).\n"
-    printf "  -l FILE\tget links to images of chapters from links in FILE (md5)\n"
-    printf "  -e LINK\tdo everything above to download the site\n"
-    printf "  -h\t\tshow help\n"
+    printf "  -t NUM\t\t\tset number of used threads, by default set to 4\n"
+    printf "  -d DIR\t\t\tset directory\n"
+    printf "  -p LINK\t\t\tget list of comics by going through pages in LINK\n"
+    printf "  -c FILE\t\t\tget json of comics from links in FILE (md5).\n"
+    printf "  -l FILE\t\t\tget links to images of chapters from links in FILE (md5)\n"
+    printf "  --full-comic LINK\t\tget all metadata from comic in LINK\n"
+    printf "  --full-pages LINK\t\tget all metadata from pages in LINK\n"
+    printf "  --download-chapter LINK\tget download images of chapter in LINK\n"
+    printf "  --download-comic LINK\t\tget download images of comic in LINK\n"
+    printf "  --download-pages LINK\t\tget download images of pages in LINK\n"
+    printf "  -h\t\t\t\tshow help\n"
 }
 
 ucurl() {
@@ -32,7 +47,13 @@ baseurl() {
     sed -E 's/^(^http(s)?:\/\/([a-zA-Z][^/]*\.)*[A-Za-z]*).*$/\1/'
 }
 
-get_page_info() {
+getmd5() {
+    local -r rh="$(md5sum <<< "$1")"
+    echo "${rh%  *}"
+}
+
+get_comic() {
+    local t1 bbase t2
     t1="$(ucurl "$1" | tr -d '\n\t\r')"
     {
     echo $(hgrep 'h1 | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//') #title
@@ -95,6 +116,121 @@ get_chapter_images() {
     ucurl "$1" | tr -d '\n\t\r' | hgrep 'img #image-[0-9]\+ data-src | "%(data-src)a\n"'
 }
 
+get_pages() {
+    local t next g bbase rr
+    t="$(ucurl "$1" | tr -d "\n\t\r")"
+    next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
+
+    if [ -n "$next" ]
+    then
+        while [ -n "$next" ]
+        do
+            echo "$next" >&2
+            hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"' <<< "$t"
+            next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
+            t="$(ucurl "$next" | tr -d "\n\t\r")"
+        done
+    else
+        g=0;
+        bbase="$(baseurl <<< "$2")"
+        rr="not null";
+
+        while [ -n "$rr" ]
+        do
+            rr="$(ucurl "$bbase/wp-admin/admin-ajax.php" --compressed -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=madara_load_more&page='"$g"'&template=madara-core%2Fcontent%2Fcontent-archive&vars%5Bpaged%5D=1&vars%5Borderby%5D=meta_value_num&vars%5Btemplate%5D=archive&vars%5Bsidebar%5D=right&vars%5Bpost_type%5D=wp-manga&vars%5Bpost_status%5D=publish&vars%5Bmeta_key%5D=_latest_update&vars%5Border%5D=desc&vars%5Bmeta_query%5D%5Brelation%5D=OR&vars%5Bmanga_archives_item_layout%5D=default' | tr -d '\n\t\r' | hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"')"
+            echo "$rr"
+            echo "$g" >&2
+            ((g++))
+        done
+    fi
+}
+
+get_comics_from_file() {
+    local out
+    while read -r i
+    do
+        [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
+        out="$(getmd5 "$i")"
+        [ -e "$out" ] && [ "$(stat -c%s "$out")" -gt '250' ] && continue
+        echo "$i"
+        get_comic "$i" > "$out" &
+    done < "$1"
+    wait
+}
+
+get_chapter_from_file() {
+    local out
+    while read -r i
+    do
+        [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
+        out="$(getmd5 "$i")"
+        [ -e "$out" ] && [ "$(stat -c%s "$out")" -gt '0' ] && continue
+        echo "$i"
+        get_chapter_images "$i" > "$out" &
+    done < "$1"
+    wait
+}
+
+get_comic_full() {
+    local out
+    out="$(getmd5 "$1")"
+    [ -e "$out" ] || get_comic "$1" > "$out"
+    [ -e "$out_" ] && continue
+    mkdir "${out}_"
+    cd "${out_}" || continue
+    echo "${out}_"
+    get_chapter_from_file $(jq -rM '.chapters[].link')
+    cd ..
+}
+
+get_pages_full() {
+    for i in $(get_pages "$1")
+    do
+        echo "$i"
+        get_comic_full "$i"
+    done
+}
+
+download_chapter() {
+    echo "$1"
+    ucurl --remote-name-all $(get_chapter_images "$1")
+}
+
+make_filename() {
+    tr -d '/"' <<< "$1"
+}
+
+download_chapter_mkdir() {
+    local name link
+    name="$(make_filename "$(cut -f1 <<< "$1")")"
+    link="$(cut -f2 <<< "$1")"
+    [ -e "$name" ] && return
+    mkdir "$name"
+    cd "$name" || return
+    download_chapter "$link"
+    cd ..
+}
+
+download_comic() {
+    echo "$1"
+    local -r t="$(get_comic "$1")"
+    local out
+    out="$(make_filename "$(jq '.title' <<< "$t")")"
+    echo "$t" > "$out"
+    [ -e "$out_" ] || mkdir "${out}_"
+    cd "${out}_" || return
+    echo "${out}_"
+
+    for i in $(jq -rM '.chapters | map([ .name,.link ] | @tsv)[]' <<< "$t")
+    do
+        [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
+        download_chapter_mkdir "$i" &
+    done
+
+    cd ..
+    wait
+}
+
 [ "$#" -eq '0' ] && { usage >&2; exit 1; }
 
 while [ "$#" -gt 0 ]
@@ -103,61 +239,34 @@ do
         -t) threads="$2"; shift;;
         -d) cd "$2" || continue; shift;;
         -p)
-            t="$(ucurl "$2" | tr -d "\n\t\r")"
-            next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
-
-            if [ -n "$next" ]
-            then
-                while [ -n "$next" ]
-                do
-                    hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"' <<< "$t"
-                    next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
-                    t="$(ucurl "$next" | tr -d "\n\t\r")"
-                done
-            else
-                g=0;
-                bbase="$(baseurl <<< "$2")"
-                rr="not null";
-
-                while [ -n "$rr" ]
-                do
-                    rr="$(ucurl "$bbase/wp-admin/admin-ajax.php" --compressed -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=madara_load_more&page='"$g"'&template=madara-core%2Fcontent%2Fcontent-archive&vars%5Bpaged%5D=1&vars%5Borderby%5D=meta_value_num&vars%5Btemplate%5D=archive&vars%5Bsidebar%5D=right&vars%5Bpost_type%5D=wp-manga&vars%5Bpost_status%5D=publish&vars%5Bmeta_key%5D=_latest_update&vars%5Border%5D=desc&vars%5Bmeta_query%5D%5Brelation%5D=OR&vars%5Bmanga_archives_item_layout%5D=default' | tr -d '\n\t\r' | hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"')"
-                    echo "$rr"
-                    ((g++))
-                done
-            fi
+            get_pages "$2"
             shift;;
         -c)
-            while read -r i
-            do
-                [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
-                rh="$(md5sum <<< "$i")"
-                rn="${rh%  *}"
-                [ -e "$rn" ] && [ "$(stat -c%s "$rn")" -gt '250' ] && continue
-                echo "$i"
-                get_page_info "$i" > "$rn" &
-            done < "$2"
+            get_comics_from_file "$2"
             shift;;
         -l)
-            while read -r i
-            do
-                [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
-                rh="$(md5sum <<< "$i")"
-                rn="${rh%  *}"
-                [ -e "$rn" ] && [ "$(stat -c%s "$rn")" -gt '0' ] && continue
-                echo "$i"
-                get_chapter_images "$i" > "$rn" &
-            done < "$2"
+            get_chapter_from_file "$2"
             shift;;
-        -e)
-            links="$(mktemp)"
-            trap 'rm "$links"' SIGINT EXIT
-            $0 -p "$2" > "$links"
-            $0 -t "$threads" -c "$links"
-            for i in $(find -maxdepth 1 -type f | grep -xE '\./[0-9a-f]{32}')
+        --full-comic)
+            get_comic_full "$2"
+            shift;;
+        --full-pages)
+            for i in $(get_pages "$2")
             do
-                mkdir "${i}_"
-                wordpress_madara -t "$threads" -d "${i}_" -l <(jq -r '.chapters[].link' "$i")
+                get_comic_full "$i"
+            done
+            shift;;
+        --download-chapter)
+            download_chapter "$2"
+            shift;;
+        --download-comic)
+            download_comic "$2"
+            shift;;
+        --download-pages)
+            for i in $(get_pages "$2")
+            do
+                echo "$i"
+                download_comic "$i"
             done
             shift;;
         -h) usage; exit 0;;
@@ -169,3 +278,8 @@ done
 wait
 
 #for i in $(find -maxdepth 1 -type f | grep -xE '\./[0-9a-f]{32}'); do mkdir "${i}_"; wordpress_madara -d "${i}_" -l <(jq -r '.chapters[].link' "$i"); done
+
+#wordpress-madara-scraper -c <(echo "https://manhwatop.com/manga/taming-spiritual-pets-my-spiritual-pet-is-a-female-zombie/")
+#wordpress_madara -t "$threads" -d "${i}_" -l <(jq -r '.chapters[].link' "$i")
+#for i in $(jq -r '.chapters[].link' ../a746b1051e29ac7ff7f63a1fff8cd41d); do sum="$(md5sum <<< "$i" | cut -d ' ' -f1)"; name="$(sed 's/.*\/chapter-//;s#/$##' <<< "$i")"; [ -e "$name" ] && continue; mkdir "$name"; cd "$name" || continue; ucurl -s --remote-name-all $(cat "$sum"); cd ..; done
+#for i in $(jq -r '.chapters[].link' ../a746b1051e29ac7ff7f63a1fff8cd41d); do sum="$(md5sum <<< "$i" | cut -d ' ' -f1)"; name="$(sed 's/.*\/chapter-//;s#/$##' <<< "$i")"; [ -e "$name" ] && continue; mkdir "$name"; cd "$name" || continue; ucurl -s --remote-name-all $(cat "../$sum"); cd ..; done
