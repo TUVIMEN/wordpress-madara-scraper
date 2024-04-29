@@ -4,7 +4,7 @@ A bash script for scraping image focused madara wordpress in json.
 
 ## Requirements
 
- - [hgrep](https://github.com/TUVIMEN/hgrep)
+ - [reliq](https://github.com/TUVIMEN/reliq)
  - [jq](https://github.com/stedolan/jq)
 
 ## Installation

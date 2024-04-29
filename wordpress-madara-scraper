@@ -44,7 +44,7 @@ ucurl() {
 }
 
 baseurl() {
-    sed -E 's/^(^http(s)?:\/\/([a-zA-Z][^/]*\.)*[A-Za-z]*).*$/\1/'
+    sed -E 's/^(^http(s)?:\/\/([a-zA-Z0-9-]+\.)+[A-Za-z]+).*$/\1/'
 }
 
 getmd5() {
@@ -56,50 +56,55 @@ get_comic() {
     local t1 bbase t2
     t1="$(ucurl "$1" | tr -d '\n\t\r')"
     {
-    echo $(hgrep 'h1 | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//') #title
+    echo $(reliq 'h1 | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//') #title
     t_chapters_input="$t1"
-    t_chapters="$(hgrep 'li .wp-manga-chapter; a +href -title | "%i"' <<< "$t_chapters_input")"
+    t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i"' <<< "$t_chapters_input")"
     [ -z "$t_chapters" ] && {
-        t_id="$(hgrep 'div #manga-chapters-holder data-id | "%(data-id)a\n"' <<< "$t1")"
+        t_id="$(reliq 'div #manga-chapters-holder data-id | "%(data-id)v\n"' <<< "$t1")"
         bbase="$(baseurl <<< "$1")"
         t_chapters_input="$(ucurl -X POST  -H "Referer: $1" -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=manga_get_chapters&manga='"$t_id" "$bbase/wp-admin/admin-ajax.php" | tr -d '\n\t\r')"
-        t_chapters="$(hgrep 'li .wp-manga-chapter; a +href -title | "%i"' <<< "$t_chapters_input")"
+        t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i"' <<< "$t_chapters_input")"
         [ -z "$t_chapters" ] && {
             t_chapters_input="$(ucurl "${1}ajax/chapters/" --compressed -X POST -H 'X-Requested-With: XMLHttpRequest' | tr -d '\n\t\r')"
-            t_chapters="$(hgrep 'li .wp-manga-chapter; a +href -title | "%i"' <<< "$t_chapters_input")"
+            t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i"' <<< "$t_chapters_input")"
         }
     }
     echo "$t_chapters" #chapter
-    echo "$(hgrep 'li .wp-manga-chapter; a href -title | "%(href)a"' <<< "$t_chapters_input")" #links
-    echo "$(hgrep 'li .wp-manga-chapter; span .chapter-release-date; i | "%i"' <<< "$t_chapters_input")" #dates
+    reliq '
+        . li .wp-manga-chapter; a href -title | "%(href)v" / echo "" "\n",
+        . li .wp-manga-chapter; span .chapter-release-date; i | "%i" / echo "" "\n"
+    ' <<< "$t_chapters_input"
 
-    echo "$(hgrep 'div .summary_image; img data-src | "%(data-src)a\n"' <<< "$t1")" #thumbnail
-    echo "$(hgrep 'div .summary__content | "%i\n"' <<< "$t1")" #summary
-    t2="$(hgrep 'div +class="summary_content"; div +class="post-content"' <<< "$t1")"
-    echo "$(hgrep 'span +id="averagerate" property="ratingValue" | "%i\n"' <<< "$t2" | tr -d ' ')" #rating
-    echo "$(hgrep 'span #countrate property="ratingCount" | "%i\n"' <<< "$t2")" #rating_count strtonum
-
-    echo "$(hgrep 'div .action_detail; span @m"[cC]omments" | "%i\n"' <<< "$t1" | sed 's/[cC]omments.*//; s/ //g')" #comments strtonum
-    echo "$(hgrep 'div .action_detail; span @m"bookmarked" | "%i\n"' <<< "$t1" | sed 's/ .*//')" #bookmark strtonum
-    echo "$(hgrep 'div .summary-content @m", it has " | "%i\n"' <<< "$t2" | sed 's/,.*//')" #rank
-    echo "$(hgrep 'div .summary-content @m", it has " | "%i\n"' <<< "$t2" | sed 's/.*, it has //; s/ view//; s/s//; s/ .*//')" #views strtonum
-    echo "$(hgrep 'div .post-content_item @m">Alternative"; div .summary-content | "%i\n"' <<< "$t2" | sed 's/, /,/g')" #alternatives
-    echo "$(hgrep 'div .author-content; a href | "%i"' <<< "$t2")" #authors
-    echo "$(hgrep 'div .artist-content; a href | "%i"' <<< "$t2")" #artists
-    echo "$(hgrep 'div .genres-content; a href | "%i"' <<< "$t2")" #genres
-    echo "$(hgrep 'div .post-content_item @m">Type"; div .summary-content | "%i\n"' <<< "$t2" | sed 's/^ *//;s/ *$//')" #type
-    echo "$(hgrep 'div .tags-content; a href | "%i"' <<< "$t2")" #tags
-    echo "$(hgrep 'div .post-content_item @m">Release"; div .summary-content; .* @M"<" | "%i"' <<< "$t1")" #releases
-    echo "$(hgrep 'div .post-content_item @m">Status"; div .summary-content; .* @M"<" | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//')" #status
+    reliq '
+        . div .summary_image; img data-src | "%(data-src)v\n",
+        . div .summary__content | "%i\n",
+        . div .action_detail; span m@i>"comments" | "%i\n" / sed "s/[Cc]omments.*//; s/ //g",
+        . div .action_detail; span m@"bookmarked" | "%i\n" / sed "s/ .*//",
+        . div .post-content_item m@">Release"; div .summary-content; * c@[0] | "%i" / echo "" "\n",
+        . div .post-content_item m@">Status"; div .summary-content; * c@[0] | "%i\n" / sed "s/^ *//;s/ *$//",
+        div .summary_content; div .post-content; {
+            . span #averagerate property=ratingValue | "%i\n" / tr " ",
+            . span #countrate property="ratingCount" | "%i\n",
+            . div .summary-content m@", it has " | "%i\n" / sed "s/,.*//",
+            . div .summary-content m@", it has " | "%i\n" / sed "s/.*, it has //; s/ view//; s/s//; s/ .*//",
+            . div .post-content_item m@">Alternative"; div .summary-content | "%i\n" / sed "s/, /,/g",
+            . div .author-content; a href | "%i" / echo "" "\n",
+            . div .artist-content; a href | "%i" / echo "" "\n",
+            . div .genres-content; a href | "%i" / echo "" "\n",
+            . div .post-content_item m@">Type"; div .summary-content | "%i\n" / sed "s/^ *//;s/ *$//",
+            . div .tags-content; a href | "%i" / echo "" "\n"
+        }' <<< "$t1"
     } | jq -RnMcr '
         .["title"]=input |
         .["chapters"]=([(input | split(""))[:-1],(input | split(""))[:-1],(input | split(""))[:-1]] | transpose | map({"name":.[0],"link":.[1],"date":.[2]})) |
         .["thumbnail"]=input |
         .["summary"]=input |
-        .["rating"]=input |
-        .["rating_count"]=input |
         .["comments"]=input |
         .["bookmark"]=input |
+        .["releases"]=(input | split(""))[:-1] |
+        .["status"]=input |
+        .["rating"]=input |
+        .["rating_count"]=input |
         .["rank"]=input |
         .["views"]=input |
         .["alternatives"]=(input | split(",")) |
@@ -107,37 +112,35 @@ get_comic() {
         .["artists"]=(input | split(""))[:-1] |
         .["genres"]=(input | split(""))[:-1] |
         .["type"]=input |
-        .["tags"]=(input | split(""))[:-1] |
-        .["releases"]=(input | split(""))[:-1] |
-        .["status"]=input'
+        .["tags"]=(input | split(""))[:-1]'
 }
 
 get_chapter_images() {
-    ucurl "$1" | tr -d '\n\t\r' | hgrep 'img #image-[0-9]\+ data-src | "%(data-src)a\n"'
+    ucurl "$1" | tr -d '\n\t\r' | reliq 'img #E>image-[0-9]+ data-src | "%(data-src)v\n"'
 }
 
 get_pages() {
     local t next g bbase rr
     t="$(ucurl "$1" | tr -d "\n\t\r")"
-    next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
+    next="$(reliq 'link rel=next href | "%(href)v\n"' <<< "$t")"
 
     if [ -n "$next" ]
     then
         while [ -n "$next" ]
         do
             echo "$next" >&2
-            hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"' <<< "$t"
-            next="$(hgrep 'link rel=next href | "%(href)a\n"' <<< "$t")"
+            reliq 'div data-post-id; a href l@[1] | "%(href)v\n"' <<< "$t"
+            next="$(reliq 'link rel=next href | "%(href)v\n"' <<< "$t")"
             t="$(ucurl "$next" | tr -d "\n\t\r")"
         done
     else
         g=0;
-        bbase="$(baseurl <<< "$2")"
+        bbase="$(baseurl <<< "$1")"
         rr="not null";
 
         while [ -n "$rr" ]
         do
-            rr="$(ucurl "$bbase/wp-admin/admin-ajax.php" --compressed -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=madara_load_more&page='"$g"'&template=madara-core%2Fcontent%2Fcontent-archive&vars%5Bpaged%5D=1&vars%5Borderby%5D=meta_value_num&vars%5Btemplate%5D=archive&vars%5Bsidebar%5D=right&vars%5Bpost_type%5D=wp-manga&vars%5Bpost_status%5D=publish&vars%5Bmeta_key%5D=_latest_update&vars%5Border%5D=desc&vars%5Bmeta_query%5D%5Brelation%5D=OR&vars%5Bmanga_archives_item_layout%5D=default' | tr -d '\n\t\r' | hgrep 'div +data-post-id; a href @l[1] | "%(href)a\n"')"
+            rr="$(ucurl "$bbase/wp-admin/admin-ajax.php" --compressed -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=madara_load_more&page='"$g"'&template=madara-core%2Fcontent%2Fcontent-archive&vars%5Bpaged%5D=1&vars%5Borderby%5D=meta_value_num&vars%5Btemplate%5D=archive&vars%5Bsidebar%5D=right&vars%5Bpost_type%5D=wp-manga&vars%5Bpost_status%5D=publish&vars%5Bmeta_key%5D=_latest_update&vars%5Border%5D=desc&vars%5Bmeta_query%5D%5Brelation%5D=OR&vars%5Bmanga_archives_item_layout%5D=default' | tr -d '\n\t\r' | reliq 'div data-post-id; a href l@[1] | "%(href)v\n"')"
             echo "$rr"
             echo "$g" >&2
             ((g++))
