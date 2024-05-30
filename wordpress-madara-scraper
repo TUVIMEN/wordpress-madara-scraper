@@ -56,63 +56,53 @@ get_comic() {
     local t1 bbase t2
     t1="$(ucurl "$1" | tr -d '\n\t\r')"
     {
-    echo $(reliq 'h1 | "%i\n"' <<< "$t1" | sed 's/^ *//;s/ *$//') #title
     t_chapters_input="$t1"
-    t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i"' <<< "$t_chapters_input")"
+    t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i\t"' <<< "$t_chapters_input")"
     [ -z "$t_chapters" ] && {
         t_id="$(reliq 'div #manga-chapters-holder data-id | "%(data-id)v\n"' <<< "$t1")"
         bbase="$(baseurl <<< "$1")"
         t_chapters_input="$(ucurl -X POST  -H "Referer: $1" -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=manga_get_chapters&manga='"$t_id" "$bbase/wp-admin/admin-ajax.php" | tr -d '\n\t\r')"
-        t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i"' <<< "$t_chapters_input")"
+        t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i\t"' <<< "$t_chapters_input")"
         [ -z "$t_chapters" ] && {
             t_chapters_input="$(ucurl "${1}ajax/chapters/" --compressed -X POST -H 'X-Requested-With: XMLHttpRequest' | tr -d '\n\t\r')"
-            t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i"' <<< "$t_chapters_input")"
+            t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i\t"' <<< "$t_chapters_input")"
         }
     }
-    echo "$t_chapters" #chapter
+
+    {
+    echo "$t_chapters"
     reliq '
-        . li .wp-manga-chapter; a href -title | "%(href)v" / echo "" "\n",
-        . li .wp-manga-chapter; span .chapter-release-date; i | "%i" / echo "" "\n"
+        . li .wp-manga-chapter; a href -title | "%(href)v\t" / echo "" "\n",
+        . li .wp-manga-chapter; span .chapter-release-date; i | "%i\t" / echo "" "\n"
     ' <<< "$t_chapters_input"
+    } | jq -RnMcr '
+        {"chapters":([(input | split("\t"))[:-1],(input | split("\t"))[:-1],(input | split("\t"))[:-1]] | transpose | map({"name":.[0],"link":.[1],"date":.[2]}))}'
 
     reliq '
-        . div .summary_image; img data-src | "%(data-src)v\n",
-        . div .summary__content | "%i\n",
-        . div .action_detail; span m@i>"comments" | "%i\n" / sed "s/[Cc]omments.*//; s/ //g",
-        . div .action_detail; span m@"bookmarked" | "%i\n" / sed "s/ .*//",
-        . div .post-content_item m@">Release"; div .summary-content; * c@[0] | "%i" / echo "" "\n",
-        . div .post-content_item m@">Status"; div .summary-content; * c@[0] | "%i\n" / sed "s/^ *//;s/ *$//",
+        .title h1 | "%i" / sed "s/^ *//;s/ *$//",
+        .thumbnail div .summary_image; img data-src | "%(data-src)v",
+        .summary div .summary__content | "%i",
+        div .action_detail; {
+            .comments span m@i>"comments" | "%i" / sed "s/[Cc]omments.*//; s/ //g",
+            .bookmark span m@"bookmarked" | "%i" / sed "s/ .*//",
+        },
+        .releases.a div .post-content_item m@">Release"; div .summary-content; * c@[0] | "%i\n",
+        .status div .post-content_item m@">Status"; div .summary-content; * c@[0] | "%i" / sed "s/^ *//;s/ *$//",
         div .summary_content; div .post-content; {
-            . span #averagerate property=ratingValue | "%i\n" / tr " ",
-            . span #countrate property="ratingCount" | "%i\n",
-            . div .summary-content m@", it has " | "%i\n" / sed "s/,.*//",
-            . div .summary-content m@", it has " | "%i\n" / sed "s/.*, it has //; s/ view//; s/s//; s/ .*//",
-            . div .post-content_item m@">Alternative"; div .summary-content | "%i\n" / sed "s/, /,/g",
-            . div .author-content; a href | "%i" / echo "" "\n",
-            . div .artist-content; a href | "%i" / echo "" "\n",
-            . div .genres-content; a href | "%i" / echo "" "\n",
-            . div .post-content_item m@">Type"; div .summary-content | "%i\n" / sed "s/^ *//;s/ *$//",
-            . div .tags-content; a href | "%i" / echo "" "\n"
+            .rating span #averagerate property=ratingValue | "%i" / tr " ",
+            .rating_count span #countrate property="ratingCount" | "%i",
+             div .summary-content m@", it has "; {
+                .rank * l@[0] | "%i" / sed "s/,.*//",
+                .views * l@[0] | "%i" / sed "s/.*, it has //; s/ view//; s/s//; s/ .*//"
+            },
+            .alternatives div .post-content_item m@">Alternative"; div .summary-content | "%i" / sed "s/, /,/g",
+            .authors.a div .author-content; a href | "%i\n",
+            .artists.a div .artist-content; a href | "%i\n",
+            .genres.a div .genres-content; a href | "%i\n",
+            .type div .post-content_item m@">Type"; div .summary-content | "%i" / sed "s/^ *//;s/ *$//",
+            .tags.a div .tags-content; a href | "%i\n"
         }' <<< "$t1"
-    } | jq -RnMcr '
-        .["title"]=input |
-        .["chapters"]=([(input | split(""))[:-1],(input | split(""))[:-1],(input | split(""))[:-1]] | transpose | map({"name":.[0],"link":.[1],"date":.[2]})) |
-        .["thumbnail"]=input |
-        .["summary"]=input |
-        .["comments"]=input |
-        .["bookmark"]=input |
-        .["releases"]=(input | split(""))[:-1] |
-        .["status"]=input |
-        .["rating"]=input |
-        .["rating_count"]=input |
-        .["rank"]=input |
-        .["views"]=input |
-        .["alternatives"]=(input | split(",")) |
-        .["authors"]=(input | split(""))[:-1] |
-        .["artists"]=(input | split(""))[:-1] |
-        .["genres"]=(input | split(""))[:-1] |
-        .["type"]=input |
-        .["tags"]=(input | split(""))[:-1]'
+    } | jq -srcM --arg 'link' "$1" '{"link":$link}+.[0]+.[1]'
 }
 
 get_chapter_images() {
@@ -155,7 +145,7 @@ get_comics_from_file() {
         [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
         out="$(getmd5 "$i")"
         [ -e "$out" ] && [ "$(stat -c%s "$out")" -gt '250' ] && continue
-        echo "$i"
+        echo "$i" >&2
         get_comic "$i" > "$out" &
     done < "$1"
     wait
@@ -168,7 +158,7 @@ get_chapter_from_file() {
         [ "$(jobs | wc -l)" -gt "$threads" ] && wait %%
         out="$(getmd5 "$i")"
         [ -e "$out" ] && [ "$(stat -c%s "$out")" -gt '0' ] && continue
-        echo "$i"
+        echo "$i" >&2
         get_chapter_images "$i" > "$out" &
     done < "$1"
     wait
@@ -181,7 +171,7 @@ get_comic_full() {
     [ -e "$out_" ] && continue
     mkdir "${out}_"
     cd "${out_}" || continue
-    echo "${out}_"
+    echo "${out}_" >&2
     get_chapter_from_file $(jq -rM '.chapters[].link')
     cd ..
 }
@@ -189,13 +179,13 @@ get_comic_full() {
 get_pages_full() {
     for i in $(get_pages "$1")
     do
-        echo "$i"
+        echo "$i" >&2
         get_comic_full "$i"
     done
 }
 
 download_chapter() {
-    echo "$1"
+    echo "$1" >&2
     ucurl --remote-name-all $(get_chapter_images "$1")
 }
 
@@ -215,14 +205,14 @@ download_chapter_mkdir() {
 }
 
 download_comic() {
-    echo "$1"
+    echo "$1" >&2
     local -r t="$(get_comic "$1")"
     local out
     out="$(make_filename "$(jq '.title' <<< "$t")")"
     echo "$t" > "$out"
     [ -e "$out_" ] || mkdir "${out}_"
     cd "${out}_" || return
-    echo "${out}_"
+    echo "${out}_" >&2
 
     for i in $(jq -rM '.chapters | map([ .name,.link ] | @tsv)[]' <<< "$t")
     do
@@ -268,7 +258,7 @@ do
         --download-pages)
             for i in $(get_pages "$2")
             do
-                echo "$i"
+                echo "$i" >&2
                 download_comic "$i"
             done
             shift;;
