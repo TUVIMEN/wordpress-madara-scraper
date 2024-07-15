@@ -64,7 +64,7 @@ get_comic() {
         t_chapters_input="$(ucurl -X POST  -H "Referer: $1" -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H 'X-Requested-With: XMLHttpRequest' --data-raw 'action=manga_get_chapters&manga='"$t_id" "$bbase/wp-admin/admin-ajax.php" | tr -d '\n\t\r')"
         t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i\t"' <<< "$t_chapters_input")"
         [ -z "$t_chapters" ] && {
-            t_chapters_input="$(ucurl "${1}ajax/chapters/" --compressed -X POST -H 'X-Requested-With: XMLHttpRequest' | tr -d '\n\t\r')"
+            t_chapters_input="$(ucurl "${1}ajax/chapters/" --compressed -X POST -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Length: 0' | tr -d '\n\t\r')"
             t_chapters="$(reliq 'li .wp-manga-chapter; a href -title | "%i\t"' <<< "$t_chapters_input")"
         }
     }
