@@ -8,7 +8,7 @@ A bash script for scraping image focused madara wordpress in json.
  - [jq](https://github.com/stedolan/jq)
 
 ## Installation
-    
+
     install -m 755 wordpress-madara-scraper /usr/bin
 
 ## Json format

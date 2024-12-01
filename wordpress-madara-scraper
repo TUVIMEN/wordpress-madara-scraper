@@ -33,9 +33,9 @@ usage() {
     printf "  -l FILE\t\t\tget links to images of chapters from links in FILE (md5)\n"
     printf "  --full-comic LINK\t\tget all metadata from comic in LINK\n"
     printf "  --full-pages LINK\t\tget all metadata from pages in LINK\n"
-    printf "  --download-chapter LINK\tget download images of chapter in LINK\n"
-    printf "  --download-comic LINK\t\tget download images of comic in LINK\n"
-    printf "  --download-pages LINK\t\tget download images of pages in LINK\n"
+    printf "  --download-chapter LINK\tdownload images of chapter in LINK\n"
+    printf "  --download-comic LINK\t\tdownload images of comic in LINK\n"
+    printf "  --download-pages LINK\t\tdownload images of pages in LINK\n"
     printf "  -h\t\t\t\tshow help\n"
 }
 
