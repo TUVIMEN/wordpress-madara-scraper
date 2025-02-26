@@ -83,23 +83,23 @@ get_comic() {
         .thumbnail div .summary_image; img data-src | "%(data-src)v",
         .summary div .summary__content | "%i",
         div .action_detail; {
-            .comments span m@i>"comments" | "%i" / sed "s/[Cc]omments.*//; s/ //g",
-            .bookmark span m@"bookmarked" | "%i" / sed "s/ .*//",
+            .comments span i@i>"comments" | "%i" / sed "s/[Cc]omments.*//; s/ //g",
+            .bookmark span i@"bookmarked" | "%i" / sed "s/ .*//",
         },
-        .releases.a div .post-content_item m@">Release"; div .summary-content; * c@[0] | "%i\n",
-        .status div .post-content_item m@">Status"; div .summary-content; * c@[0] | "%i" / sed "s/^ *//;s/ *$//",
+        .releases.a div .post-content_item i@">Release"; div .summary-content; * c@[0] | "%i\n",
+        .status div .post-content_item i@">Status"; div .summary-content; * c@[0] | "%i" / sed "s/^ *//;s/ *$//",
         div .summary_content; div .post-content; {
             .rating span #averagerate property=ratingValue | "%i" / tr " ",
             .rating_count span #countrate property="ratingCount" | "%i",
-             div .summary-content m@", it has "; {
+             div .summary-content i@", it has "; {
                 .rank * l@[0] | "%i" / sed "s/,.*//",
                 .views * l@[0] | "%i" / sed "s/.*, it has //; s/ view//; s/s//; s/ .*//"
             },
-            .alternatives div .post-content_item m@">Alternative"; div .summary-content | "%i" / sed "s/, /,/g",
+            .alternatives div .post-content_item i@">Alternative"; div .summary-content | "%i" / sed "s/, /,/g",
             .authors.a div .author-content; a href | "%i\n",
             .artists.a div .artist-content; a href | "%i\n",
             .genres.a div .genres-content; a href | "%i\n",
-            .type div .post-content_item m@">Type"; div .summary-content | "%i" / sed "s/^ *//;s/ *$//",
+            .type div .post-content_item i@">Type"; div .summary-content | "%i" / sed "s/^ *//;s/ *$//",
             .tags.a div .tags-content; a href | "%i\n"
         }' <<< "$t1"
     } | jq -srcM --arg 'link' "$1" '{"link":$link}+.[0]+.[1]'
