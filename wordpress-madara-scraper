@@ -106,7 +106,7 @@ get_comic() {
 }
 
 get_chapter_images() {
-    ucurl "$1" | tr -d '\n\t\r' | reliq 'img #E>image-[0-9]+ data-src | "%(data-src)v\n"'
+    ucurl "$1" | tr -d '\n\t\r' | reliq 'img #E>image-[0-9]+ data-src | "%(data-src)v\n" || img #E>image-[0-9]+ src | "%(src)v\n"'
 }
 
 get_pages() {
